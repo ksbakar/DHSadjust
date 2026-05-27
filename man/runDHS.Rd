@@ -1,5 +1,5 @@
-\name{DHSadjust}
-\alias{DHSadjust}
+\name{runDHS}
+\alias{runDHS}
 \title{Bayesian adjusted model for location displacement for DHS data.}
 \description{
 This function is used to obtain Maximum A Posteriori (MAP) estimates for the Bayesian model.
