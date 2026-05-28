@@ -324,7 +324,6 @@ evolve_summary_binary <- function(data, out, cluster_var,
   return(list(
     fixed_parameters = round(fixed_summary, digits),
     variability_parameters = round(variability_summary, digits),
-    #simulations = as_draws_df(data.frame(fixed_simulations,variability_simulations)),
     simulations = tibble(data.frame(fixed_simulations,variability_simulations)),
     cluster_summary =  cluster_summary,
     zstar_scaled = zstar_hat,
@@ -356,7 +355,7 @@ run_fnc_binary <- function(data,
   ##
 }
 
-## for gaussian: cont. outcome
+## for gaussian: continuous outcome
 
 evolve_summary_gaussian <- function(data, out, cluster_var,
                                   digits = 2, sim = 10000,
@@ -504,6 +503,172 @@ run_fnc_gaussian <- function(data,
                            hessian = TRUE, draws = draws,
                            importance_resampling = TRUE)
   para <- evolve_summary_gaussian(data = data, out = out,
+                                cluster_var = cluster_var,
+                                digits = digits)
+  para
+  ##
+}
+
+## summary function for poisson: count outcome
+
+evolve_summary_poisson <- function(data, out, cluster_var,
+                                   digits = 2,
+                                   sim = 10000,
+                                   cluster_summary = FALSE) {
+  ##
+  K <- data$data_list_stan$K
+  Q <- data$data_list_stan$Q
+  opt_cov <- solve(-out$hessian[1:(K + Q), 1:(K + Q)])
+  fixed_simulations <- list()
+  variability_simulations <- list()
+  post.beta.mn <- out$par[1:K]
+  post.beta.sd <- sqrt(diag(opt_cov[1:K, 1:K]))
+  beta_summary <- matrix(NA, nrow = K, ncol = 3)
+  for (i in 1:K) {
+    sims <- exp(
+      rnorm(
+        sim,
+        mean = post.beta.mn[i],
+        sd = post.beta.sd[i]
+      )
+    )
+    fixed_simulations[[colnames(data$data_list_stan$x)[i]]] <- sims
+    beta_summary[i, ] <- quantile(
+      sims,
+      prob = c(0.5, 0.025, 0.975),
+      na.rm = TRUE
+    )
+  }
+  rownames(beta_summary) <- colnames(data$data_list_stan$x)
+  colnames(beta_summary) <- c(
+    "IRR_median",
+    "IRR_lower_95",
+    "IRR_upper_95"
+  )
+  post.zeta.mn <- out$par[(K + 1):(K + Q)]
+  post.zeta.sd <- sqrt(
+    diag(opt_cov)[(K + 1):(K + Q)]
+  )
+  zeta_summary <- matrix(NA, nrow = Q, ncol = 3)
+  for (i in 1:Q) {
+    sims <- exp(
+      rnorm(
+        sim,
+        mean = post.zeta.mn[i],
+        sd = post.zeta.sd[i]
+      )
+    )
+    fixed_simulations[[cluster_var[i]]] <- sims
+    zeta_summary[i, ] <- quantile(
+      sims,
+      prob = c(0.5, 0.025, 0.975),
+      na.rm = TRUE
+    )
+  }
+  rownames(zeta_summary) <- cluster_var[1:Q]
+  colnames(zeta_summary) <- c(
+    "IRR_median",
+    "IRR_lower_95",
+    "IRR_upper_95"
+  )
+  fixed_summary <- rbind(
+    beta_summary,
+    zeta_summary
+  )
+  var_names <- c(
+    "sigma_r_hat",
+    "sigma_u_hat",
+    "sigma_nu_hat"
+  )
+  cov_para <- solve(
+    -out$hessian[var_names, var_names]
+  )
+  sig_means <- out$par[var_names]
+  sig_sds <- sqrt(diag(cov_para))
+  variability_summary <- matrix(
+    NA,
+    nrow = length(var_names),
+    ncol = 3
+  )
+  for (i in seq_along(var_names)) {
+    sims <- rnorm(
+      sim,
+      mean = sig_means[i],
+      sd = sig_sds[i]
+    )
+    sims[sims < 0] <- 0
+    variability_simulations[[var_names[i]]] <- sims
+    variability_summary[i, ] <- quantile(
+      sims,
+      prob = c(0.5, 0.025, 0.975),
+      na.rm = TRUE
+    )
+  }
+  rownames(variability_summary) <- var_names
+  colnames(variability_summary) <- c(
+    "median",
+    "lower_95",
+    "upper_95"
+  )
+  df <- data$data
+  df$lambda <- out$par[
+    grep("lambda", names(out$par))
+  ]
+  cluster_summary <- df %>%
+    group_by(clst) %>%
+    dplyr::summarise(
+      lambda_mean   = mean(lambda, na.rm = TRUE),
+      lambda_sd     = sd(lambda, na.rm = TRUE),
+      lambda_median = median(lambda, na.rm = TRUE),
+      lambda_low    = quantile(lambda, 0.025, na.rm = TRUE),
+      lambda_up     = quantile(lambda, 0.975, na.rm = TRUE),
+      .groups = "drop"
+    )
+  ## assumes outcome variable is column (Q + 2)
+  y_obs <- df[, 1 + Q + 1]
+  log_lik_vec <- dpois(
+    y_obs,
+    lambda = df$lambda,
+    log = TRUE
+  )
+  lppd <- sum(log_lik_vec)
+  waic_approx <- -2 * lppd
+  zstar_hat <- out$par[grep("zstar_hat_scaled", names(out$par))]
+  zstar_hat <- matrix(zstar_hat,nrow = nrow(df))
+  zstar_hat <- data.frame(
+    clst = df$clst,
+    zstar_hat
+  )
+  names(zstar_hat)[-1] <- cluster_var
+  zstar_hat <- tibble(zstar_hat)
+  return(
+    list(fixed_parameters = round(fixed_summary, digits),
+         variability_parameters = round(variability_summary, digits),
+         simulations = tibble(data.frame(fixed_simulations,variability_simulations)),
+         cluster_summary = cluster_summary,
+         zstar_scaled = zstar_hat,
+         lppd =  lppd, waic_approx = waic_approx
+    )
+  )
+}
+
+## run function for poisson model
+
+run_fnc_poisson <- function(data,
+                           cluster_var = c("Precipitation_2020"),
+                           digits=4,
+                           draws = 10){
+  ##
+  stan_file <- system.file(
+    "stan",
+    "dhs_poisson.stan",
+    package = "DHSadjust"
+  )
+  model <- rstan::stan_model(stan_file)
+  out <- rstan::optimizing(model, data = data$data_list_stan,
+                           hessian = TRUE, draws = draws,
+                           importance_resampling = TRUE)
+  para <- evolve_summary_poisson(data = data, out = out,
                                 cluster_var = cluster_var,
                                 digits = digits)
   para
