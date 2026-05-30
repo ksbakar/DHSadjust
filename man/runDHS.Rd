@@ -13,7 +13,7 @@ runDHS(formula, data, family = "binomial", id_var, coord_var,
 \arguments{
 \item{formula}{Formula function.}
 \item{data}{Data frame containing the variables of interest, including latitude, longitude and variables related to spatial locations.}
-\item{family}{Currently, can take 'binomial' and 'gaussian'.}
+\item{family}{Currently, can take  'gaussian', 'binomial', and 'poisson'.}
 \item{id_var}{Define cluster ID variable name. This variable should be included in 'data'.}
 \item{coord_var}{Define cluster coordinate variable names, e.g., c("lon","lat"). These variables should be included in 'data'.}
 \item{cluster_var}{Define cluster level predictor variable name/s. These variables should be included in 'data'.}
